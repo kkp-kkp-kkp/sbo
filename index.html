@@ -21,10 +21,7 @@ body { margin:0; font-family:Arial; background:#111; color:#eee; }
     background:#1a1a1a; padding:10px;
     overflow:auto;
 }
-canvas {
-    display:block;
-    margin-top:60px;
-}
+canvas { display:block; margin-top:60px; }
 </style>
 </head>
 <body>
@@ -32,10 +29,11 @@ canvas {
 <div id="cursor">X:0 Z:0</div>
 
 <div id="topbar">
-<input id="data" style="width:45%">
+<input id="data" style="width:40%">
 <button onclick="copyData()">копировать</button>
+<button onclick="loadData()">загрузить</button>
 
-<label><input type="checkbox" id="hideKnown"> известные</label>
+<label><input type="checkbox" id="hideKnown"> скрыть известные</label>
 
 <select id="players"></select>
 <span id="types"></span>
@@ -102,7 +100,7 @@ function buildTypes(){
 buildTypes();
 
 function visible(i){
-    if(hideKnown.checked && i.type) return false;
+    if(hideKnown.checked && i.type !== "Не исследован") return false;
     if(players.value && !i.players.includes(players.value)) return false;
 
     let enabled=[...document.querySelectorAll(".t:checked")].map(x=>x.value);
@@ -130,15 +128,16 @@ function draw(){
         let i=islands[idx];
         if(!visible(i)) continue;
 
-        let p = worldToScreen(i.x,i.z);
-        let x=p[0], z=p[1];
+        let [x,z] = worldToScreen(i.x,i.z);
 
         if(x<0||z<0||x>canvas.width||z>canvas.height) continue;
 
         ctx.fillStyle = (idx===active) ? "#fff" : getColor(i.type);
         ctx.beginPath();
+
         let r = Math.max(4, Math.min(12, 8 / scale));
-		ctx.arc(x, z, r, 0, Math.PI*2);
+        ctx.arc(x, z, r, 0, Math.PI*2);
+
         ctx.fill();
     }
 }
@@ -179,7 +178,7 @@ canvas.onwheel=e=>{
 canvas.onclick=e=>{
     let w=screenToWorld(e.clientX,e.clientY-60);
 
-    let best=null,dist=200;
+    let best=null,dist=400;
 
     islands.forEach((i,idx)=>{
         let d=Math.hypot(i.x-w[0],i.z-w[1]);
@@ -201,7 +200,7 @@ function show(){
     "<b>"+i.x+" "+i.z+"</b><br>"+
     "Игроки:<br><input id='p' value='"+i.players.join(",")+"'><br>"+
     "Тип:<br><select id='t'>"+
-    TYPES.map(x=>"<option value='"+x+"' "+(x===i.type?"selected":"")+">"+x+"</option>").join("")+
+    TYPES.map(x=>"<option "+(x===i.type?"selected":"")+">"+x+"</option>").join("")+
     "</select><br>"+
     "Подтип:<br><input id='s' value='"+i.sub+"'><br>"+
     "Коммент:<br><textarea id='c'>"+i.c+"</textarea><br>"+
@@ -220,52 +219,86 @@ function save(){
     draw();
 }
 
-// ===== DATA =====
+// ===== ENCODE / DECODE =====
 function encode(){
     let json = JSON.stringify(islands);
     let utf8 = new TextEncoder().encode(json);
 
     let bin = "";
-    for(let i = 0; i < utf8.length; i++){
+    for(let i=0;i<utf8.length;i++){
         bin += String.fromCharCode(utf8[i]);
     }
-
     return btoa(bin);
 }
 
 function decode(str){
-    // убираем пробелы/переносы
     str = str.trim();
 
-    // если это ссылка с #
-    if(str.includes("#")){
-        str = str.split("#")[1];
+    if(str.startsWith("http")){
+        let res = str.match(/#(.+)/);
+        if(res) str = res[1];
+        else throw "нет данных в ссылке";
     }
 
-    // фикс base64 (иногда теряются =)
-    while (str.length % 4 !== 0) {
-        str += "=";
-    }
+    str = str.replace(/[^A-Za-z0-9+/=]/g, "");
+    while(str.length % 4 !== 0) str += "=";
+
+    let bin = atob(str);
+
+    let bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+
+    return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+// ===== LOAD =====
+async function loadData(){
+    let val = data.value.trim();
 
     try {
-        let bin = atob(str);
+        let arr;
 
-        let bytes = new Uint8Array(bin.length);
-        for(let i = 0; i < bin.length; i++){
-            bytes[i] = bin.charCodeAt(i);
+        if(val.startsWith("http")){
+            let res = await fetch(val);
+            let text = await res.text();
+
+            try { arr = JSON.parse(text); }
+            catch { arr = decode(text); }
+
+        } else {
+            arr = decode(val);
         }
 
-        return JSON.parse(new TextDecoder().decode(bytes));
+        applyData(arr);
+        updatePlayers();
+        draw();
 
     } catch(e){
-        console.error("decode fail:", str.slice(0,50));
-        throw e;
+        console.error(e);
+        alert("Ошибка загрузки");
     }
 }
-function updateData(){ data.value = encode(); }
+
+function updateData(){
+    let code = encode();
+    data.value = code;
+    location.hash = code;
+}
+
 function copyData(){
     data.select();
     document.execCommand("copy");
+}
+
+// ===== APPLY =====
+function applyData(arr){
+    let map = new Map();
+    arr.forEach(i=>map.set(i.x+"_"+i.z,i));
+
+    islands.forEach(i=>{
+        let k=i.x+"_"+i.z;
+        if(map.has(k)) Object.assign(i,map.get(k));
+    });
 }
 
 // ===== PLAYERS =====
@@ -275,7 +308,7 @@ function updatePlayers(){
 
     players.innerHTML="<option value=''>все</option>";
     set.forEach(p=>{
-        players.innerHTML += "<option value='"+p+"'>"+p+"</option>";
+        players.innerHTML += "<option>"+p+"</option>";
     });
 }
 players.onchange=draw;
@@ -320,56 +353,15 @@ function fit(){
 }
 
 // ===== INIT =====
-function applyData(arr){
-    let map = new Map();
+updatePlayers();
 
-    arr.forEach(i=>{
-        map.set(i.x + "_" + i.z, i);
-    });
-
-    islands.forEach(i=>{
-        let key = i.x + "_" + i.z;
-        if(map.has(key)){
-            Object.assign(i, map.get(key));
-        }
-    });
+if(location.hash.length > 1){
+    try{
+        applyData(decode(location.hash));
+    }catch(e){}
 }
 
-updatePlayers();
 updateData();
-data.addEventListener("input", () => {
-    try {
-        let val = data.value.trim();
-
-        // если это ссылка
-        if(val.startsWith("http")){
-            let res = await fetch(val);
-            if(!res.ok) throw new Error("HTTP ошибка");
-
-            let text = await res.text();
-
-            // пробуем как JSON
-            try {
-                arr = JSON.parse(text);
-            } catch {
-                // иначе считаем что это base64
-                arr = decode(text);
-            }
-        } 
-        // 👉 если это просто строка
-        else {
-            arr = decode(val);
-        }
-
-        let decoded = arr;
-        applyData(decoded);
-
-        updatePlayers();
-        draw();
-    } catch(e){
-        console.log("Ошибка загрузки данных", e);
-    }
-});
 fit();
 draw();
 </script>
