@@ -175,18 +175,32 @@ canvas.onwheel=e=>{
     draw();
 };
 
-canvas.onclick=e=>{
-    let w=screenToWorld(e.clientX,e.clientY-60);
+canvas.onclick = e => {
+    let w = screenToWorld(e.clientX, e.clientY - 60);
 
-    let best=null,dist=400;
+    let enabledTypes = new Set(
+        [...document.querySelectorAll(".t:checked")].map(x => x.value)
+    );
 
-    islands.forEach((i,idx)=>{
-        let d=Math.hypot(i.x-w[0],i.z-w[1]);
-        if(d<dist){dist=d; best=idx;}
+    let best = null;
+    let dist = 200;
+
+    islands.forEach((i, idx) => {
+
+        // 👉 УЧЁТ ФИЛЬТРОВ
+        if (hideKnown.checked && i.type !== "Не исследован") return;
+        if (!enabledTypes.has(i.type)) return;
+        if (players.value && !i.players.includes(players.value)) return;
+
+        let d = Math.hypot(i.x - w[0], i.z - w[1]);
+        if (d < dist) {
+            dist = d;
+            best = idx;
+        }
     });
 
-    if(best!==null){
-        active=best;
+    if (best !== null) {
+        active = best;
         show();
         draw();
     }
@@ -303,12 +317,24 @@ function applyData(arr){
 
 // ===== PLAYERS =====
 function updatePlayers(){
-    let set=new Set();
-    islands.forEach(i=>i.players.forEach(p=>set.add(p)));
+    let set = new Set();
 
-    players.innerHTML="<option value=''>все</option>";
-    set.forEach(p=>{
-        players.innerHTML += "<option>"+p+"</option>";
+    islands.forEach(i =>
+        i.players.forEach(p => set.add(p))
+    );
+
+    let arr = Array.from(set);
+
+    // 👉 сортировка: сначала по длине, потом по алфавиту
+    arr.sort((a, b) => {
+        if (a.length !== b.length) return a.length - b.length;
+        return a.localeCompare(b);
+    });
+
+    players.innerHTML = "<option value=''>все</option>";
+
+    arr.forEach(p => {
+        players.innerHTML += `<option value="${p}">${p}</option>`;
     });
 }
 players.onchange=draw;
@@ -360,7 +386,36 @@ if(location.hash.length > 1){
         applyData(decode(location.hash));
     }catch(e){}
 }
+window.addEventListener("load", async () => {
+    try {
+        const url = "https://kkp-kkp-kkp.github.io/sbo/data";
 
+        let res = await fetch(url);
+        if (!res.ok) throw new Error("Не удалось загрузить данные");
+
+        let text = await res.text();
+
+        let arr;
+
+        // 👉 пробуем JSON
+        try {
+            arr = JSON.parse(text);
+        } catch {
+            // 👉 иначе base64
+            arr = decode(text);
+        }
+
+        applyData(arr);
+        updatePlayers();
+        fit();
+        draw();
+
+        console.log("Данные загружены из URL");
+
+    } catch (e) {
+        console.warn("Автозагрузка не сработала:", e);
+    }
+});
 updateData();
 fit();
 draw();
