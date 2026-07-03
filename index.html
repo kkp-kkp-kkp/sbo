@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Island Map</title>
+<style>
+body { margin:0; font-family:Arial; background:#111; color:#eee; }
+#topbar {
+    position:fixed; top:0; width:100%;
+    background:#000; padding:6px;
+    text-align:center; z-index:10;
+}
+#cursor {
+    position:fixed; left:10px; top:10px;
+    background:#000; padding:4px 6px;
+    font-size:12px;
+}
+#side {
+    position:fixed; right:0; top:60px;
+    width:260px; height:calc(100% - 60px);
+    background:#1a1a1a; padding:10px;
+    overflow:auto;
+}
+canvas {
+    display:block;
+    margin-top:60px;
+}
+</style>
+</head>
+<body>
+
+<div id="cursor">X:0 Z:0</div>
+
+<div id="topbar">
+<input id="data" style="width:45%">
+<button onclick="copyData()">копировать</button>
+
+<label><input type="checkbox" id="hideKnown"> известные</label>
+
+<select id="players"></select>
+<span id="types"></span>
+
+<input id="coord" placeholder="X Z">
+<button onclick="nearest()">найти</button>
+<button onclick="fit()">центр</button>
+</div>
+
+<div id="side">Выбери остров</div>
+<canvas id="c"></canvas>
+
+<script>
+const STEP = 332;
+const DIV = 40;
+
+let canvas = document.getElementById("c");
+let ctx = canvas.getContext("2d");
+
+function resize(){
+    canvas.width = innerWidth;
+    canvas.height = innerHeight - 60;
+}
+resize();
+window.onresize = resize;
+
+// ===== DATA =====
+let islands = [];
+
+// эпоха 1
+for (let z=166; z<=112050; z+=STEP){
+    islands.push({x:166,z,players:[],type:"Не исследован",sub:"",c:""});
+}
+
+// эпоха 2
+for (let x=498; x<=6806; x+=STEP){
+    for (let z=0; z<=106572; z+=STEP){
+        islands.push({x:x,z:z,players:[],type:"Не исследован",sub:"",c:""});
+    }
+}
+
+// ===== VIEW =====
+let scale=1, offX=0, offZ=0;
+
+function worldToScreen(x,z){
+    return [x/DIV*scale + offX, z/DIV*scale + offZ];
+}
+
+function screenToWorld(x,z){
+    return [(x-offX)/scale*DIV, (z-offZ)/scale*DIV];
+}
+
+// ===== FILTERS =====
+const TYPES=["База","Шахта","Пустой","Не исследован","Спавнер"];
+
+function buildTypes(){
+    const el = document.getElementById("types");
+    el.innerHTML="";
+    TYPES.forEach(t=>{
+        el.innerHTML += '<label><input type="checkbox" class="t" value="'+t+'" checked>'+t+'</label>';
+    });
+    document.querySelectorAll(".t").forEach(cb=>cb.onchange=draw);
+}
+buildTypes();
+
+function visible(i){
+    if(hideKnown.checked && i.type) return false;
+    if(players.value && !i.players.includes(players.value)) return false;
+
+    let enabled=[...document.querySelectorAll(".t:checked")].map(x=>x.value);
+    if(enabled.length && !enabled.includes(i.type)) return false;
+
+    return true;
+}
+
+// ===== DRAW =====
+let active=null;
+
+function getColor(t){
+    if(t==="База") return "#00ff88";
+    if(t==="Шахта") return "#ffaa00";
+    if(t==="Спавнер") return "#ff4444";
+    if(t==="Пустой") return "#666";
+    if(t==="Не исследован") return "#a64cff";
+    return "#fff";
+}
+
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    for(let idx=0; idx<islands.length; idx++){
+        let i=islands[idx];
+        if(!visible(i)) continue;
+
+        let p = worldToScreen(i.x,i.z);
+        let x=p[0], z=p[1];
+
+        if(x<0||z<0||x>canvas.width||z>canvas.height) continue;
+
+        ctx.fillStyle = (idx===active) ? "#fff" : getColor(i.type);
+        ctx.beginPath();
+        let r = Math.max(4, Math.min(12, 8 / scale));
+		ctx.arc(x, z, r, 0, Math.PI*2);
+        ctx.fill();
+    }
+}
+
+// ===== INTERACTION =====
+let drag=false,startX,startZ;
+
+canvas.onmousedown=e=>{
+    drag=true;
+    startX=e.clientX-offX;
+    startZ=e.clientY-offZ;
+};
+
+window.onmouseup=()=>drag=false;
+
+window.onmousemove=e=>{
+    if(drag){
+        offX=e.clientX-startX;
+        offZ=e.clientY-startZ;
+        draw();
+    }
+    let w=screenToWorld(e.clientX,e.clientY-60);
+    document.getElementById("cursor").textContent="X:"+ (w[0]|0)+" Z:"+(w[1]|0);
+};
+
+canvas.onwheel=e=>{
+    e.preventDefault();
+    let zoom = e.deltaY<0?1.1:0.9;
+
+    let mx=e.clientX, mz=e.clientY-60;
+    offX = mx - (mx-offX)*zoom;
+    offZ = mz - (mz-offZ)*zoom;
+
+    scale*=zoom;
+    draw();
+};
+
+canvas.onclick=e=>{
+    let w=screenToWorld(e.clientX,e.clientY-60);
+
+    let best=null,dist=200;
+
+    islands.forEach((i,idx)=>{
+        let d=Math.hypot(i.x-w[0],i.z-w[1]);
+        if(d<dist){dist=d; best=idx;}
+    });
+
+    if(best!==null){
+        active=best;
+        show();
+        draw();
+    }
+};
+
+// ===== PANEL =====
+function show(){
+    let i=islands[active];
+
+    document.getElementById("side").innerHTML =
+    "<b>"+i.x+" "+i.z+"</b><br>"+
+    "Игроки:<br><input id='p' value='"+i.players.join(",")+"'><br>"+
+    "Тип:<br><select id='t'>"+
+    TYPES.map(x=>"<option value='"+x+"' "+(x===i.type?"selected":"")+">"+x+"</option>").join("")+
+    "</select><br>"+
+    "Подтип:<br><input id='s' value='"+i.sub+"'><br>"+
+    "Коммент:<br><textarea id='c'>"+i.c+"</textarea><br>"+
+    "<button onclick='save()'>сохранить</button>";
+}
+
+function save(){
+    let i=islands[active];
+    i.players=document.getElementById("p").value.split(",").map(x=>x.trim()).filter(x=>x);
+    i.type=document.getElementById("t").value;
+    i.sub=document.getElementById("s").value;
+    i.c=document.getElementById("c").value;
+
+    updatePlayers();
+    updateData();
+    draw();
+}
+
+// ===== DATA =====
+function encode(){
+    let json = JSON.stringify(islands);
+    let utf8 = new TextEncoder().encode(json);
+
+    let bin = "";
+    for(let i = 0; i < utf8.length; i++){
+        bin += String.fromCharCode(utf8[i]);
+    }
+
+    return btoa(bin);
+}
+
+function decode(str){
+    // убираем пробелы/переносы
+    str = str.trim();
+
+    // если это ссылка с #
+    if(str.includes("#")){
+        str = str.split("#")[1];
+    }
+
+    // фикс base64 (иногда теряются =)
+    while (str.length % 4 !== 0) {
+        str += "=";
+    }
+
+    try {
+        let bin = atob(str);
+
+        let bytes = new Uint8Array(bin.length);
+        for(let i = 0; i < bin.length; i++){
+            bytes[i] = bin.charCodeAt(i);
+        }
+
+        return JSON.parse(new TextDecoder().decode(bytes));
+
+    } catch(e){
+        console.error("decode fail:", str.slice(0,50));
+        throw e;
+    }
+}
+function updateData(){ data.value = encode(); }
+function copyData(){
+    data.select();
+    document.execCommand("copy");
+}
+
+// ===== PLAYERS =====
+function updatePlayers(){
+    let set=new Set();
+    islands.forEach(i=>i.players.forEach(p=>set.add(p)));
+
+    players.innerHTML="<option value=''>все</option>";
+    set.forEach(p=>{
+        players.innerHTML += "<option value='"+p+"'>"+p+"</option>";
+    });
+}
+players.onchange=draw;
+
+// ===== SEARCH =====
+function nearest(){
+    let v=coord.value.split(" ").map(Number);
+    let best=null,dist=2000;
+
+    islands.forEach((i,idx)=>{
+        let d=Math.hypot(i.x-v[0],i.z-v[1]);
+        if(d<dist){dist=d; best=idx;}
+    });
+
+    if(best!==null){
+        active=best;
+        show();
+        draw();
+    }
+}
+
+// ===== FIT =====
+function fit(){
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+
+    islands.forEach(i=>{
+        minX=Math.min(minX,i.x);
+        maxX=Math.max(maxX,i.x);
+        minZ=Math.min(minZ,i.z);
+        maxZ=Math.max(maxZ,i.z);
+    });
+
+    let w=(maxX-minX)/DIV;
+    let h=(maxZ-minZ)/DIV;
+
+    scale=Math.min(canvas.width/w,canvas.height/h)*0.9;
+
+    offX=-minX/DIV*scale + 50;
+    offZ=-minZ/DIV*scale + 50;
+
+    draw();
+}
+
+// ===== INIT =====
+function applyData(arr){
+    let map = new Map();
+
+    arr.forEach(i=>{
+        map.set(i.x + "_" + i.z, i);
+    });
+
+    islands.forEach(i=>{
+        let key = i.x + "_" + i.z;
+        if(map.has(key)){
+            Object.assign(i, map.get(key));
+        }
+    });
+}
+
+updatePlayers();
+updateData();
+data.addEventListener("input", () => {
+    try {
+        let val = data.value.trim();
+
+        // если это ссылка
+        if(val.startsWith("http")){
+            let hash = val.split("#")[1];
+            if(hash) val = hash;
+        }
+
+        let decoded = decode(val);
+        applyData(decoded);
+
+        updatePlayers();
+        draw();
+    } catch(e){
+        console.log("Ошибка загрузки данных", e);
+    }
+});
+fit();
+draw();
+</script>
+
+</body>
+</html>
