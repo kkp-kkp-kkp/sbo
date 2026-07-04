@@ -118,7 +118,7 @@ function getColor(t){
     if(t==="Спавнер") return "#ff4444";
     if(t==="Пустой") return "#666";
     if(t==="Не исследован") return "#a64cff";
-    if(t==="Удалён") return "#e1f2f2";
+    if(t==="Удалён") return "#c7dcdd";
     return "#fff";
 }
 
@@ -330,29 +330,36 @@ function updatePlayers(){
     arr.sort((a, b) => {
         const normalize = s => s.trim().toLowerCase();
     
-        const firstChar = s => normalize(s)[0] || "";
+        const order = [
+            "!", "#",
+            "0","1","2","3","4","5","6","7","8","9",
+            "_"
+        ];
     
-        const charPriority = c => {
-            if (c === "!") return 0;
-            if (c === "#") return 1;
-            if (/[0-9]/.test(c)) return 2;
-            if (c === "_") return 3;
-            if (/[a-z]/.test(c)) return 4;
-            if (/[а-яё]/.test(c)) return 5;
-            return 6;
+        const getRank = c => {
+            let i = order.indexOf(c);
+            if (i !== -1) return i;
+    
+            if (/[a-z]/.test(c)) return 100;
+            if (/[а-яё]/.test(c)) return 200;
+    
+            return 300;
         };
     
         let A = normalize(a);
         let B = normalize(b);
     
-        let p1 = charPriority(firstChar(A));
-        let p2 = charPriority(firstChar(B));
+        let c1 = A[0] || "";
+        let c2 = B[0] || "";
     
-        // 👉 сначала по приоритету символа
-        if (p1 !== p2) return p1 - p2;
+        let r1 = getRank(c1);
+        let r2 = getRank(c2);
     
-        // 👉 потом обычная сортировка внутри группы
-        return A.localeCompare(B, ['en', 'ru'], { sensitivity: 'base' });
+        // 👉 сначала по нашему порядку
+        if (r1 !== r2) return r1 - r2;
+    
+        // 👉 если одинаковая группа — сравниваем БЕЗ ломания порядка
+        return A.localeCompare(B, 'en', { sensitivity: 'base' });
     });
 
     players.innerHTML = "<option value=''>все</option>";
