@@ -87,7 +87,7 @@ function screenToWorld(x,z){
 }
 
 // ===== FILTERS =====
-const TYPES=["База","Шахта","Пустой","Не исследован","Спавнер"];
+const TYPES=["База","Шахта","Пустой","Не исследован","Спавнер","Удалён"];
 
 function buildTypes(){
     const el = document.getElementById("types");
@@ -118,6 +118,7 @@ function getColor(t){
     if(t==="Спавнер") return "#ff4444";
     if(t==="Пустой") return "#666";
     if(t==="Не исследован") return "#a64cff";
+    if(t==="Удалён") return "#e1f2f2";
     return "#fff";
 }
 
