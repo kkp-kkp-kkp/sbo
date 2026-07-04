@@ -326,8 +326,30 @@ function updatePlayers(){
 
     let arr = Array.from(set);
 
-    // 👉 сортировка A-Z
-    arr.sort((a, b) => a.localeCompare(b, 'ru'));
+    // 👉 сортировка
+    arr.sort((a, b) => {
+        const normalize = s => s.trim().toLowerCase();
+    
+        const group = s => {
+            s = normalize(s);
+    
+            if (/^[^a-zа-яё]/i.test(s)) return 0; // спецсимволы + цифры
+            if (/^[a-z]/i.test(s)) return 1;      // английский
+            if (/^[а-яё]/i.test(s)) return 2;     // русский
+            return 3;
+        };
+    
+        let g1 = group(a);
+        let g2 = group(b);
+    
+        if (g1 !== g2) return g1 - g2;
+    
+        return normalize(a).localeCompare(
+            normalize(b),
+            ['en', 'ru'],
+            { sensitivity: 'base' }
+        );
+    });
 
     players.innerHTML = "<option value=''>все</option>";
 
